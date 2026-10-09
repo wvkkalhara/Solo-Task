@@ -600,7 +600,7 @@ input[type="range"].field-range::-webkit-slider-thumb {
 }
 
 /* ------------------------------------------------------------------ */
-/*  PRINT — only #print-report survives                                */
+/*  PRINT — only the selected Print Center report survives             */
 /* ------------------------------------------------------------------ */
 #print-report {
   display: none;
@@ -617,16 +617,237 @@ input[type="range"].field-range::-webkit-slider-thumb {
   }
   .ambient,
   .app-shell,
-  .toast-stack {
+  .toast-stack,
+  .print-ui {
     display: none !important;
   }
   #print-report {
     display: block !important;
     color: #111;
     font-family: "Inter", sans-serif;
+    font-size: 11pt;
+    line-height: 1.35;
   }
   #print-report * {
     box-shadow: none !important;
     text-shadow: none !important;
+  }
+
+  .print-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 20px;
+    padding-bottom: 10px;
+    border-bottom: 3px solid #111;
+  }
+  .print-title {
+    font-size: 22pt;
+    font-weight: 800;
+    letter-spacing: -0.6px;
+  }
+  .print-subtitle {
+    margin-top: 2px;
+    color: #444;
+    font-size: 10.5pt;
+  }
+  .print-meta {
+    flex: none;
+    color: #555;
+    font-size: 8.5pt;
+    text-align: right;
+  }
+
+  .print-day {
+    margin-top: 13px;
+    break-inside: avoid;
+  }
+  .print-day-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    background: #111 !important;
+    color: #fff !important;
+    font-size: 9pt;
+    font-weight: 750;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .print-empty {
+    padding: 8px 10px;
+    border-bottom: 1px solid #ddd;
+    color: #777;
+    font-size: 8.5pt;
+    font-style: italic;
+  }
+
+  .print-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 8.7pt;
+  }
+  .print-table tr {
+    break-inside: avoid;
+  }
+  .print-table td,
+  .print-table th {
+    padding: 6px 5px;
+    border-bottom: 1px solid #ddd;
+    text-align: left;
+    vertical-align: top;
+  }
+  .print-table thead {
+    display: table-header-group;
+  }
+  .print-table th {
+    border-bottom: 2px solid #111;
+    color: #444;
+    font-size: 7.5pt;
+    font-weight: 750;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .print-check-cell {
+    width: 20px;
+    padding-left: 5px !important;
+    padding-right: 2px !important;
+  }
+  .print-checkbox {
+    position: relative;
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 1.5px solid #111;
+    border-radius: 2px;
+    vertical-align: middle;
+  }
+  .print-checkbox.checked {
+    background: #111 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .print-checkbox.checked::after {
+    content: "";
+    position: absolute;
+    left: 3px;
+    top: 1px;
+    width: 3px;
+    height: 6px;
+    border: solid #fff;
+    border-width: 0 1.5px 1.5px 0;
+    transform: rotate(45deg);
+  }
+  .print-time {
+    width: 112px;
+    color: #333;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 7.7pt;
+    white-space: nowrap;
+  }
+  .print-subject {
+    width: 105px;
+    color: #444;
+  }
+  .print-duration {
+    width: 48px;
+    color: #444;
+    text-align: right !important;
+    white-space: nowrap;
+  }
+  .print-row-title {
+    font-weight: 650;
+  }
+  .print-note {
+    margin-top: 1px;
+    color: #666;
+    font-size: 7.7pt;
+    line-height: 1.25;
+  }
+  .print-muted {
+    color: #666;
+    font-weight: 400;
+  }
+  .print-meal td {
+    background: #f3f3f3 !important;
+    color: #555;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  .print-complete {
+    color: #777;
+  }
+  .print-complete .print-row-title {
+    text-decoration: line-through;
+  }
+  .print-score {
+    font-family: "JetBrains Mono", monospace;
+    font-weight: 750;
+    text-align: right !important;
+  }
+
+  .print-section-block {
+    margin-top: 20px;
+  }
+  .print-section-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    border-bottom: 2px solid #111;
+    padding-bottom: 4px;
+    color: #555;
+    font-size: 8.5pt;
+  }
+  .print-section-title {
+    margin: 0;
+    color: #111;
+    font-size: 12pt;
+    font-weight: 800;
+  }
+  .print-list-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    padding: 5px 2px;
+    border-bottom: 1px dashed #ccc;
+    font-size: 8.7pt;
+  }
+
+  .print-page-break {
+    break-before: page;
+    page-break-before: always;
+    padding-top: 1px;
+  }
+  .print-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    margin-top: 22px;
+    padding-top: 7px;
+    border-top: 1px solid #bbb;
+    color: #555;
+    font-size: 7.5pt;
+  }
+
+  /* Compact mode fits larger task lists and denser 4-week plans. */
+  #print-report.print-compact .print-day {
+    margin-top: 8px;
+  }
+  #print-report.print-compact .print-day-head {
+    padding: 3px 8px;
+    font-size: 8pt;
+  }
+  #print-report.print-compact .print-table {
+    font-size: 7.6pt;
+  }
+  #print-report.print-compact .print-table td,
+  #print-report.print-compact .print-table th {
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+  #print-report.print-compact .print-empty {
+    padding: 4px 8px;
   }
 }

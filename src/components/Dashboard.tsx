@@ -14,6 +14,7 @@ import {
   Hourglass,
   RotateCcw,
   Sparkles,
+  Timer,
   Zap,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
@@ -35,9 +36,25 @@ import {
 } from "../lib/utils";
 import { FadeIn } from "./ui";
 
-export default function Dashboard() {
-  const { state, sessions, unplaced, setView, toggleSession, toggleTask, studySubjects, subject } =
-    useApp();
+export default function Dashboard({
+  onAddTask,
+  onInterrupt,
+}: {
+  onAddTask: () => void;
+  onInterrupt: () => void;
+}) {
+  const {
+    state,
+    sessions,
+    unplaced,
+    setView,
+    toggleSession,
+    toggleTask,
+    studySubjects,
+    subject,
+    routine,
+    setSettingsOpen,
+  } = useApp();
   /* dashboard always reflects the REAL current week */
   const weekStart = startOfWeek(new Date());
 
@@ -58,7 +75,9 @@ export default function Dashboard() {
 
   /* Fair block counting: past blocks only count once done,
      today/future blocks count as pending. */
-  const weekSessions = sessions.filter((s) => weekKeys.includes(s.date) && s.subject !== "school");
+  const weekSessions = sessions.filter(
+    (s) => weekKeys.includes(s.date) && s.subject !== "school" && s.kind !== "meal"
+  );
   const pastDone = weekSessions.filter((s) => s.date < tKey && s.done).length;
   const pending = weekSessions.filter((s) => s.date >= tKey);
   const doneCount = pastDone + pending.filter((s) => s.done).length;
@@ -83,7 +102,7 @@ export default function Dashboard() {
 
   const todaySessions = sessions.filter((s) => s.date === tKey);
   const todayPlanned = todaySessions
-    .filter((s) => s.subject !== "school")
+    .filter((s) => s.subject !== "school" && s.kind !== "meal")
     .reduce((a, s) => a + (s.end - s.start), 0);
 
   /* subject focus this week */
@@ -97,7 +116,7 @@ export default function Dashboard() {
   const maxMin = Math.max(1, ...subjectMins.map((s) => s.mins));
 
   /* ---- free time + catch-up intelligence ---- */
-  const freeDays = getFreeTime(sessions, new Date(), 7);
+  const freeDays = getFreeTime(sessions, new Date(), routine, 7);
   const freeToday = freeDays[0];
   const freeWeekMins = freeDays.reduce((a, d) => a + d.freeMinutes, 0);
   const missed = getMissed(sessions);
@@ -107,7 +126,13 @@ export default function Dashboard() {
   /* up next: first 3 unfinished sessions from now-ish onward */
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
   const upcoming = sessions
-    .filter((s) => !s.done && s.subject !== "school" && (s.date > tKey || (s.date === tKey && s.end >= nowMin)))
+    .filter(
+      (s) =>
+        !s.done &&
+        s.subject !== "school" &&
+        s.kind !== "meal" &&
+        (s.date > tKey || (s.date === tKey && s.end >= nowMin))
+    )
     .slice(0, 3);
 
   const stats = [
@@ -141,6 +166,63 @@ export default function Dashboard() {
     },
   ];
 
+  /* ---------------- first-run onboarding ---------------- */
+  if (state.tasks.length === 0 && state.papers.length === 0) {
+    return (
+      <FadeIn className="space-y-5">
+        <div className="card relative overflow-hidden p-8 text-center sm:p-12">
+          <div className="grad-bg mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl shadow-lg shadow-violet-600/30">
+            <Sparkles size={24} color="#fff" />
+          </div>
+          <h2 className="font-display text-[24px] font-bold tracking-tight sm:text-[30px]">
+            Let’s build your <span className="grad-text">A/L timetable.</span>
+          </h2>
+          <p className="mx-auto mt-2 max-w-[460px] text-[13.5px] leading-relaxed text-[var(--muted)]">
+            Solo Task plans up to 4 months ahead. Add your fixed classes first, then your study
+            work — everything else gets slotted into your real free time, around your meals and
+            sleep.
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-2">
+            <button className="btn btn-primary" onClick={onAddTask}>
+              <Sparkles size={15} /> Add your first task
+            </button>
+            <button className="btn btn-ghost" onClick={() => setSettingsOpen(true)}>
+              <Coffee size={15} /> Set your day & meals
+            </button>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            {
+              icon: Hourglass,
+              title: "1 · Lock your fixed hours",
+              body: "School, tuition, revision classes — add them as “Fixed time” so nothing clashes.",
+            },
+            {
+              icon: Sparkles,
+              title: "2 · Dump your workload",
+              body: "Papers, problem sets, revision. Give each an estimate and a deadline.",
+            },
+            {
+              icon: FileCheck2,
+              title: "3 · Let it plan",
+              body: "Work is spread across your free gaps by urgency — then just tick things off.",
+            },
+          ].map((s, i) => (
+            <FadeIn key={s.title} delay={0.08 + i * 0.07}>
+              <div className="card h-full p-4">
+                <s.icon size={17} className="mb-2 text-[var(--acc2)]" />
+                <div className="text-[13px] font-bold">{s.title}</div>
+                <div className="mt-1 text-[12px] leading-snug text-[var(--muted)]">{s.body}</div>
+              </div>
+            </FadeIn>
+          ))}
+        </div>
+      </FadeIn>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* ------------- hero greeting ------------- */}
@@ -154,9 +236,18 @@ export default function Dashboard() {
             {fmtDuration(todayPlanned)} of study
           </p>
         </div>
-        <button className="btn btn-ghost" onClick={() => setView("calendar")}>
-          View week <ArrowRight size={14} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            className="btn btn-ghost !border-amber-400/40 !text-amber-400"
+            onClick={onInterrupt}
+            title="Block unplanned time and reflow today"
+          >
+            <Zap size={14} /> Came up
+          </button>
+          <button className="btn btn-ghost" onClick={() => setView("calendar")}>
+            View week <ArrowRight size={14} />
+          </button>
+        </div>
       </FadeIn>
 
       {/* ------------- catch-up: what you didn't do ------------- */}
@@ -419,8 +510,9 @@ export default function Dashboard() {
 
 /* Single row in "Today’s plan" */
 function TodayRow({ session: s, onToggle }: { session: Session; onToggle: () => void }) {
-  const { subject } = useApp();
+  const { subject, state } = useApp();
   const sub = subject(s.subject);
+  const src = state.tasks.find((t) => t.id === s.taskId);
   return (
     <div
       className={`group flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 transition-all hover:border-[var(--border-strong)] ${
@@ -445,12 +537,21 @@ function TodayRow({ session: s, onToggle }: { session: Session; onToggle: () => 
           <span>· {fmtDuration(s.end - s.start)}</span>
         </div>
       </div>
+      {src?.noSplit && (
+        <span className="chip !text-[10px] !border-amber-400/40 !text-amber-400" title="One unbroken sitting">
+          <Timer size={10} /> solid
+        </span>
+      )}
       <span
         className={`chip !text-[10px] ${
-          s.auto ? "!border-violet-400/40 !text-violet-400" : ""
+          src?.urgent
+            ? "!border-amber-400/50 !text-amber-400"
+            : s.auto
+              ? "!border-violet-400/40 !text-violet-400"
+              : ""
         }`}
       >
-        {s.auto ? "auto" : "fixed"}
+        {src?.urgent ? "came up" : s.auto ? "auto" : "fixed"}
       </span>
     </div>
   );

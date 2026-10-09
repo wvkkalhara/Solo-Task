@@ -2,11 +2,23 @@
 /*  Calendar — week grid (desktop) + day agenda (mobile)               */
 /* ------------------------------------------------------------------ */
 
-import { Check, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Sparkles, Utensils } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useApp } from "../context/AppContext";
+import { MEAL_COLOR } from "../lib/data";
+import { getFreeTime } from "../lib/insights";
 import type { Session } from "../lib/types";
-import { addDays, dateKey, DAYS_FULL, DAYS_LETTER, fmtDuration, fmtTime, todayKey } from "../lib/utils";
+import {
+  addDays,
+  dateKey,
+  DAYS_FULL,
+  DAYS_LETTER,
+  DAYS_SHORT,
+  fmtDuration,
+  fmtTime,
+  startOfWeek,
+  todayKey,
+} from "../lib/utils";
 import { FadeIn } from "./ui";
 
 const DAY_START = 6 * 60; // 6:00 AM
@@ -15,7 +27,9 @@ const HOUR_PX = 52;
 const HOURS = Array.from({ length: (DAY_END - DAY_START) / 60 }, (_, i) => DAY_START + i * 60);
 
 export default function CalendarView() {
-  const { sessions, weekStart, weekOffset, setWeekOffset, toggleSession, subject } = useApp();
+  const { sessions, weekStart, weekOffset, setWeekOffset, toggleSession, subject, routine } =
+    useApp();
+  const [mode, setMode] = useState<"week" | "month">("week");
 
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const tKey = todayKey();
@@ -33,13 +47,30 @@ export default function CalendarView() {
   const end = days[6];
   const range = `${days[0].getDate()} ${days[0].toLocaleString("en", { month: "short" })} – ${end.getDate()} ${end.toLocaleString("en", { month: "short" })}, ${end.getFullYear()}`;
 
+  /* month mode: 4 weeks starting from the viewed week */
+  const monthDays = Array.from({ length: 28 }, (_, i) => addDays(weekStart, i));
+  const monthLabel = `${weekStart.toLocaleString("en", { month: "long" })} ${weekStart.getFullYear()} · 4-week view`;
+  const freeMap = new Map(
+    getFreeTime(sessions, weekStart, routine, 28).map((f) => [f.key, f])
+  );
+
   const top = (m: number) => ((m - DAY_START) / 60) * HOUR_PX;
 
   return (
     <FadeIn className="space-y-4">
       {/* -------- toolbar -------- */}
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="font-display text-[20px] font-bold tracking-tight">{range}</h2>
+        <h2 className="font-display text-[20px] font-bold tracking-tight">
+          {mode === "week" ? range : monthLabel}
+        </h2>
+        <div className="segmented !w-auto flex-none">
+          <button className={mode === "week" ? "active" : ""} onClick={() => setMode("week")}>
+            Week
+          </button>
+          <button className={mode === "month" ? "active" : ""} onClick={() => setMode("month")}>
+            Month
+          </button>
+        </div>
         <div className="ml-auto flex items-center gap-2">
           <div className="mr-2 hidden items-center gap-4 text-[11.5px] font-medium text-[var(--muted)] md:flex">
             <span className="flex items-center gap-1.5">
@@ -53,14 +84,95 @@ export default function CalendarView() {
           <button className="btn btn-ghost !px-3" onClick={() => setWeekOffset(0)} disabled={inCurrentWeek}>
             Today
           </button>
-          <button className="icon-btn" onClick={() => setWeekOffset((w) => w - 1)} aria-label="Previous week">
+          <button
+            className="icon-btn"
+            onClick={() => setWeekOffset((w) => w - (mode === "month" ? 4 : 1))}
+            aria-label="Previous"
+          >
             <ChevronLeft size={16} />
           </button>
-          <button className="icon-btn" onClick={() => setWeekOffset((w) => w + 1)} aria-label="Next week">
+          <button
+            className="icon-btn"
+            onClick={() => setWeekOffset((w) => w + (mode === "month" ? 4 : 1))}
+            aria-label="Next"
+          >
             <ChevronRight size={16} />
           </button>
         </div>
       </div>
+
+      {/* ============ MONTH — 4-week load overview ============ */}
+      {mode === "month" && (
+        <div className="card p-4">
+          <div className="mb-2 grid grid-cols-7 gap-1.5">
+            {DAYS_SHORT.map((d, i) => (
+              <div
+                key={i}
+                className="text-center text-[10px] font-bold uppercase tracking-wider text-[var(--muted)]"
+              >
+                {d}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1.5">
+            {monthDays.map((d) => {
+              const key = dateKey(d);
+              const info = freeMap.get(key);
+              const day = sessions.filter((s) => s.date === key && s.kind !== "meal");
+              const studyMins = day
+                .filter((s) => s.kind === "flexible")
+                .reduce((a, s) => a + (s.end - s.start), 0);
+              const isToday = key === tKey;
+              const isPast = key < tKey;
+              const load = info?.load ?? 0;
+              return (
+                <button
+                  key={key}
+                  onClick={() => {
+                    setWeekOffset(
+                      Math.round(
+                        (startOfWeek(d).getTime() - startOfWeek(new Date()).getTime()) / 604800000
+                      )
+                    );
+                    setMode("week");
+                  }}
+                  className={`flex min-h-[74px] flex-col rounded-xl border p-2 text-left transition-all hover:border-[var(--acc1)] ${
+                    isToday ? "border-[var(--acc1)] bg-[var(--acc-soft)]" : "border-[var(--border)]"
+                  } ${isPast ? "opacity-45" : ""}`}
+                >
+                  <span className="font-display text-[13px] font-bold leading-none">{d.getDate()}</span>
+                  {studyMins > 0 ? (
+                    <>
+                      <span className="mt-1 font-mono text-[9.5px] text-[var(--muted)]">
+                        {fmtDuration(studyMins)}
+                      </span>
+                      <div className="track mt-auto !h-1.5">
+                        <div
+                          style={{
+                            width: `${Math.min(100, Math.round(load * 100))}%`,
+                            background:
+                              load > 0.85 ? "#fb7185" : load > 0.6 ? "#fbbf24" : "#34d399",
+                          }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <span className="mt-auto text-[9.5px] text-[var(--faint)]">free</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-[11.5px] text-[var(--muted)]">
+            Four weeks at a glance — the planner schedules up to 4 months ahead. Tap any day to open
+            its week.
+          </p>
+        </div>
+      )}
+
+      {mode === "week" && (
+      <>
+      
 
       {/* ============ MOBILE — day agenda ============ */}
       <div className="space-y-3 lg:hidden">
@@ -182,29 +294,41 @@ export default function CalendarView() {
 
                     {/* sessions */}
                     {daySessions.map((s) => {
-                      const sub = subject(s.subject);
-                      const h = Math.max(18, ((s.end - s.start) / 60) * HOUR_PX - 3);
+                      const isMeal = s.kind === "meal";
+                      const color = isMeal ? MEAL_COLOR : subject(s.subject).color;
+                      const h = Math.max(16, ((s.end - s.start) / 60) * HOUR_PX - 3);
                       return (
                         <div
                           key={s.id}
                           className={`cal-event ${s.auto ? "auto-ev" : ""} ${s.done ? "ev-done" : ""} ${
-                            key < tKey && !s.done ? "opacity-45" : ""
-                          }`}
+                            key < tKey && !s.done && !isMeal ? "opacity-45" : ""
+                          } ${isMeal ? "!cursor-default" : ""}`}
                           style={{
                             top: top(s.start) + 1,
                             height: h,
-                            background: s.auto ? `${sub.color}14` : `${sub.color}26`,
-                            borderColor: sub.color,
+                            background: isMeal
+                              ? "repeating-linear-gradient(45deg, rgba(148,163,184,.14) 0 6px, transparent 6px 12px)"
+                              : s.auto
+                                ? `${color}14`
+                                : `${color}26`,
+                            borderColor: color,
                             color: "var(--text)",
+                            opacity: isMeal ? 0.75 : undefined,
                           }}
-                          title={`${s.taskName} · ${fmtTime(s.start)}–${fmtTime(s.end)} — click to toggle done`}
-                          onClick={() => toggleSession(s)}
+                          title={
+                            isMeal
+                              ? `${s.taskName} · protected break`
+                              : `${s.taskName} · ${fmtTime(s.start)}–${fmtTime(s.end)} — click to toggle done`
+                          }
+                          onClick={() => !isMeal && toggleSession(s)}
                         >
                           <div className="flex items-center gap-1 truncate font-semibold leading-tight">
-                            {s.done ? (
+                            {isMeal ? (
+                              <Utensils size={9} className="flex-none" style={{ color }} />
+                            ) : s.done ? (
                               <Check size={10} strokeWidth={3.5} className="flex-none text-emerald-400" />
                             ) : (
-                              s.auto && h > 34 && <Sparkles size={9} className="flex-none" style={{ color: sub.color }} />
+                              s.auto && h > 34 && <Sparkles size={9} className="flex-none" style={{ color }} />
                             )}
                             <span className="truncate">{s.taskName}</span>
                           </div>
@@ -226,8 +350,10 @@ export default function CalendarView() {
 
       <p className="hidden text-[12px] text-[var(--muted)] lg:block">
         Tip — click any block to mark it done. Dashed blocks were placed automatically around your
-        fixed classes; completed blocks feed your analytics.
+        classes and meals; completed blocks feed your analytics.
       </p>
+      </>
+      )}
     </FadeIn>
   );
 }
@@ -253,17 +379,26 @@ function AgendaList({
   return (
     <div className="space-y-2">
       {sessions.map((s) => {
-        const sub = subject(s.subject);
+        const isMeal = s.kind === "meal";
+        const sub = isMeal
+          ? { name: "Protected break", color: MEAL_COLOR }
+          : subject(s.subject);
         return (
           <div
             key={s.id}
-            className={`flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 ${
-              s.done ? "is-done" : ""
-            }`}
+            className={`flex items-center gap-3 rounded-xl border border-[var(--border)] px-3 py-2.5 ${
+              isMeal ? "border-dashed bg-transparent opacity-70" : "bg-[var(--surface)]"
+            } ${s.done ? "is-done" : ""}`}
           >
-            <button className={`check ${s.done ? "on" : ""}`} onClick={() => onToggle(s)} aria-label="Toggle done">
-              {s.done && <Check size={13} strokeWidth={3.5} />}
-            </button>
+            {isMeal ? (
+              <span className="flex h-[21px] w-[21px] flex-none items-center justify-center">
+                <Utensils size={13} style={{ color: MEAL_COLOR }} />
+              </span>
+            ) : (
+              <button className={`check ${s.done ? "on" : ""}`} onClick={() => onToggle(s)} aria-label="Toggle done">
+                {s.done && <Check size={13} strokeWidth={3.5} />}
+              </button>
+            )}
             <div className="w-[72px] flex-none font-mono text-[10.5px] font-semibold leading-tight text-[var(--muted)]">
               {fmtTime(s.start)}
               <br />
@@ -277,7 +412,7 @@ function AgendaList({
               </div>
             </div>
             <span className={`chip !text-[9.5px] ${s.auto ? "!border-violet-400/40 !text-violet-400" : ""}`}>
-              {s.auto ? "auto" : "fixed"}
+              {isMeal ? "break" : s.auto ? "auto" : "fixed"}
             </span>
           </div>
         );

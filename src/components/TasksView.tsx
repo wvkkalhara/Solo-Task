@@ -12,7 +12,9 @@ import {
   Repeat,
   Settings2,
   Sparkles,
+  Timer,
   Trash2,
+  Zap,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
@@ -228,6 +230,19 @@ function TaskRow({
               </span>
             )
           )}
+          {t.noSplit && (
+            <span
+              className="chip !py-0.5 !text-[10px] !border-amber-400/40 !text-amber-400"
+              title="Scheduled as one unbroken sitting"
+            >
+              <Timer size={10} /> one sitting
+            </span>
+          )}
+          {t.urgent && (
+            <span className="chip !py-0.5 !text-[10px] !border-amber-400/50 !text-amber-400">
+              <Zap size={10} /> came up
+            </span>
+          )}
           {t.paperMeta && (
             <span
               className="chip !py-0.5 !text-[10px] !border-emerald-400/40 !text-emerald-400"
@@ -242,8 +257,15 @@ function TaskRow({
             </span>
           )}
           {warn && (
-            <span className="chip !py-0.5 !text-[10px] !border-amber-400/50 !text-amber-400">
-              won’t fit in time
+            <span
+              className="chip !py-0.5 !text-[10px] !border-rose-400/50 !text-rose-400"
+              title={
+                t.noSplit
+                  ? "No single free gap is long enough before the deadline — shorten it, allow splitting, or extend your day."
+                  : "Not enough free time before the deadline."
+              }
+            >
+              {t.noSplit ? "no gap long enough" : "won’t fit in time"}
             </span>
           )}
         </div>

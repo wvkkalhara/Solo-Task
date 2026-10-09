@@ -8,10 +8,13 @@ import { useState } from "react";
 import AnalyticsView from "./components/AnalyticsView";
 import CalendarView from "./components/CalendarView";
 import Dashboard from "./components/Dashboard";
+import InterruptModal from "./components/InterruptModal";
 import PaperModal from "./components/PaperModal";
 import PastPapersView from "./components/PastPapersView";
+import PrintCenter from "./components/PrintCenter";
 import PrintReport from "./components/PrintReport";
 import ScorePrompt from "./components/ScorePrompt";
+import SettingsModal from "./components/SettingsModal";
 import Sidebar from "./components/Sidebar";
 import SubjectManager from "./components/SubjectManager";
 import TaskModal from "./components/TaskModal";
@@ -19,6 +22,7 @@ import TasksView from "./components/TasksView";
 import Toasts from "./components/Toasts";
 import TopBar from "./components/TopBar";
 import { AppProvider, useApp } from "./context/AppContext";
+import { DEFAULT_PRINT_CONFIG, type PrintConfig } from "./lib/print";
 import type { PastPaper, Task } from "./lib/types";
 
 function Shell() {
@@ -31,6 +35,16 @@ function Shell() {
     open: false,
     paper: null,
   });
+  const [printOpen, setPrintOpen] = useState(false);
+  const [interruptOpen, setInterruptOpen] = useState(false);
+  const [printConfig, setPrintConfig] = useState<PrintConfig>(DEFAULT_PRINT_CONFIG);
+
+  const generatePrint = (config: PrintConfig) => {
+    setPrintConfig(config);
+    setPrintOpen(false);
+    // Let React commit the selected report before the browser captures it.
+    window.setTimeout(() => window.print(), 120);
+  };
 
   return (
     <>
@@ -44,7 +58,11 @@ function Shell() {
       <div className="app-shell print:hidden">
         <Sidebar />
         <div className="lg:pl-[250px]">
-          <TopBar onAddTask={() => setTaskModal({ open: true, task: null })} />
+          <TopBar
+            onAddTask={() => setTaskModal({ open: true, task: null })}
+            onPrint={() => setPrintOpen(true)}
+            onInterrupt={() => setInterruptOpen(true)}
+          />
           <main className="mx-auto max-w-[1200px] px-4 py-6 sm:px-6">
             <AnimatePresence mode="wait">
               <motion.div
@@ -54,7 +72,12 @@ function Shell() {
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
               >
-                {view === "dashboard" && <Dashboard />}
+                {view === "dashboard" && (
+                  <Dashboard
+                    onAddTask={() => setTaskModal({ open: true, task: null })}
+                    onInterrupt={() => setInterruptOpen(true)}
+                  />
+                )}
                 {view === "calendar" && <CalendarView />}
                 {view === "tasks" && (
                   <TasksView onEdit={(t) => setTaskModal({ open: true, task: t })} />
@@ -83,12 +106,20 @@ function Shell() {
         initial={paperModal.paper}
         onClose={() => setPaperModal((m) => ({ ...m, open: false }))}
       />
+      <InterruptModal open={interruptOpen} onClose={() => setInterruptOpen(false)} />
       <SubjectManager />
+      <SettingsModal />
       <ScorePrompt />
+      <PrintCenter
+        open={printOpen}
+        initial={printConfig}
+        onClose={() => setPrintOpen(false)}
+        onPrint={generatePrint}
+      />
       <Toasts />
 
-      {/* print-only weekly report */}
-      <PrintReport />
+      {/* print-only report selected in the Print Center */}
+      <PrintReport config={printConfig} />
     </>
   );
 }

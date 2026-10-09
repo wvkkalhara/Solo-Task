@@ -7,7 +7,7 @@
 /* ------------------------------------------------------------------ */
 
 import { getStudyWindows, subtractIntervals, type Interval } from "./scheduler";
-import type { PaperMeta, PaperPart, PaperType, Session, Task } from "./types";
+import type { PaperMeta, PaperPart, PaperType, Routine, Session, Task } from "./types";
 import { addDays, dateKey, todayKey } from "./utils";
 
 /* ================================================================== */
@@ -33,7 +33,12 @@ const USEFUL_GAP = 25;
  * window are still genuinely empty (after fixed classes AND
  * auto-scheduled study blocks).
  */
-export function getFreeTime(sessions: Session[], from: Date, days = 7): FreeDay[] {
+export function getFreeTime(
+  sessions: Session[],
+  from: Date,
+  routine: Routine,
+  days = 7
+): FreeDay[] {
   const out: FreeDay[] = [];
   const nowKey = todayKey();
   const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
@@ -41,7 +46,7 @@ export function getFreeTime(sessions: Session[], from: Date, days = 7): FreeDay[
   for (let i = 0; i < days; i++) {
     const date = addDays(from, i);
     const key = dateKey(date);
-    let windows = getStudyWindows(date);
+    let windows = getStudyWindows(date, routine);
 
     // today: ignore time that has already passed
     if (key === nowKey) {

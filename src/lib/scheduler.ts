@@ -1,19 +1,19 @@
 /* ------------------------------------------------------------------ */
 /*  AUTO-SCHEDULING ENGINE                                             */
 /*                                                                     */
-/*  Strategy                                                           */
-/*  1. Every day has "study windows" (when the student is available).  */
-/*  2. Fixed tasks (school, tuition classes…) claim their slots first. */
-/*  3. Remaining free windows become placeable blocks.                 */
-/*  4. Flexible tasks are poured into those blocks in priority order:  */
-/*        daily habits → weekly routines → one-offs (earliest deadline) */
-/*  5. A chunk never exceeds MAX_CHUNK minutes (focus limit) and a     */
-/*     short BREAK is inserted between consecutive chunks.             */
-/*  6. Whatever still doesn't fit is reported as "unplaced" so the UI  */
-/*     can warn the student instead of silently dropping work.         */
+/*  Plans MONTHS ahead, not days. Each day is built as:                */
+/*    1. wake → sleep is the only time that exists                     */
+/*    2. meals/breaks from your routine are carved out (protected)     */
+/*    3. fixed commitments (school, tuition) claim their slots         */
+/*    4. what remains is poured with flexible work:                    */
+/*         daily habits → weekly routines → deadline-ordered one-offs  */
+/*    5. urgency-aware: a task due in 2 days outranks one due in 30,   */
+/*       and work is spread so nothing is crammed the night before     */
+/*    6. anything that cannot fit before its deadline is reported      */
 /* ------------------------------------------------------------------ */
 
-import type { Session, Task } from "./types";
+import { MEAL_SUBJECT } from "./data";
+import type { Routine, Session, Task } from "./types";
 import { addDays, dateKey, startOfDay, toMin } from "./utils";
 
 export interface Interval {
@@ -21,30 +21,34 @@ export interface Interval {
   end: number;
 }
 
-/** Longest single focus block the engine will create */
-const MAX_CHUNK = 90;
 /** Minimum block worth scheduling */
 const MIN_CHUNK = 20;
-/** Breath of fresh air inserted after a chunk when more work follows */
-const BREAK = 10;
-/** How many days ahead the engine plans */
-export const PLAN_DAYS = 14;
+/** How far ahead the engine plans (≈4 months) */
+export const PLAN_DAYS = 120;
+/** Cap on daily flexible study so the planner stays humane */
+const DAILY_STUDY_CAP = 8 * 60;
 
-/** When is the student available to study? */
-export function getStudyWindows(day: Date): Interval[] {
-  const dow = day.getDay();
-  if (dow === 0 || dow === 6) {
-    // Weekend — long, generous windows
-    return [
-      { start: 8 * 60, end: 12 * 60 },
-      { start: 13 * 60, end: 21 * 60 },
-    ];
-  }
-  // Weekday — early morning + after school
-  return [
-    { start: 6 * 60, end: 7 * 60 + 15 },
-    { start: 15 * 60, end: 22 * 60 },
-  ];
+/* ------------------------------------------------------------------ */
+/*  Day shape                                                          */
+/* ------------------------------------------------------------------ */
+
+/** Protected meal/break blocks for a given day */
+export function getMealIntervals(routine: Routine): Interval[] {
+  return routine.meals
+    .filter((m) => m.enabled)
+    .map((m) => ({ start: toMin(m.start), end: toMin(m.start) + m.minutes }))
+    .sort((a, b) => a.start - b.start);
+}
+
+/**
+ * When may the student study? Everything between wake and sleep,
+ * minus protected meals/breaks.
+ */
+export function getStudyWindows(_day: Date, routine: Routine): Interval[] {
+  const wake = toMin(routine.wake);
+  let sleep = toMin(routine.sleep);
+  if (sleep <= wake) sleep = 24 * 60 - 1; // guard against inverted input
+  return subtractIntervals([{ start: wake, end: sleep }], getMealIntervals(routine));
 }
 
 /** Does this task occur on the given calendar day? */
@@ -105,40 +109,54 @@ export interface ScheduleResult {
   unplaced: Task[];
 }
 
-/**
- * @param tasks    all tasks
- * @param fromDate first day to RENDER (e.g. Monday of this week)
- * @param days     how many days to render
- * @param fromFlex flexible work is only PLACED on/after this day
- *                 (keeps the past intact while showing fixed history)
- */
 export function generateSchedule(
   tasks: Task[],
   fromDate: Date,
+  routine: Routine,
   days = PLAN_DAYS,
   fromFlex?: Date
 ): ScheduleResult {
   const from = startOfDay(fromDate);
   const flexStart = fromFlex ? startOfDay(fromFlex) : from;
   const sessions: Session[] = [];
+  const maxChunk = Math.max(MIN_CHUNK, routine.focusBlock || 90);
+  const breakMin = Math.max(0, routine.breakMinutes ?? 10);
 
   /* Minutes still waiting to be placed, per one-off task id */
   const remaining = new Map<string, number>();
-  /* Minutes already placed (for "· cont." labels) */
   const placed = new Map<string, number>();
-  tasks
-    .filter((t) => t.kind === "flexible" && t.frequency === "once" && !t.completed)
-    .forEach((t) => {
-      remaining.set(t.id, t.estimatedMinutes);
-      placed.set(t.id, 0);
-    });
+  const oneOffPool = tasks.filter(
+    (t) => t.kind === "flexible" && t.frequency === "once" && !t.completed
+  );
+  oneOffPool.forEach((t) => {
+    remaining.set(t.id, t.estimatedMinutes);
+    placed.set(t.id, 0);
+  });
 
   for (let i = 0; i < days; i++) {
     const day = addDays(from, i);
     const key = dateKey(day);
     const dow = day.getDay();
 
-    /* ---- 1 · fixed commitments claim their time -------------------- */
+    /* ---- 1 · meals are protected, and shown on the calendar -------- */
+    for (const m of routine.meals) {
+      if (!m.enabled) continue;
+      const start = toMin(m.start);
+      sessions.push({
+        id: `meal_${m.id}__${key}`,
+        taskId: `meal_${m.id}`,
+        taskName: m.label,
+        subject: MEAL_SUBJECT,
+        date: key,
+        start,
+        end: start + m.minutes,
+        kind: "meal",
+        auto: false,
+        done: false,
+      });
+    }
+
+    /* ---- 2 · fixed commitments claim their time -------------------- */
     const busy: Interval[] = [];
     for (const t of tasks) {
       if (t.kind !== "fixed" || t.completed || !occursOn(t, day)) continue;
@@ -149,65 +167,92 @@ export function generateSchedule(
       busy.push({ start, end });
     }
 
-    /* ---- 2 · what is left becomes placeable study blocks ----------- */
-    const blocks = subtractIntervals(getStudyWindows(day), busy)
+    /* ---- 3 · what is left becomes placeable study blocks ----------- */
+    const blocks = subtractIntervals(getStudyWindows(day, routine), busy)
       .filter((b) => b.end - b.start >= MIN_CHUNK)
       .map((b) => ({ ...b }));
 
-    /** Pour `need` minutes of task t into the day's blocks.
-        `contStart` marks one-offs already partially planned on earlier
-        days (so follow-up chunks read "· cont."). Returns leftover. */
+    let dailyUsed = 0;
+
+    /** Pour `need` minutes of task t into the day's blocks. */
     const pour = (t: Task, need: number, contStart = false): number => {
+      /* ---- unbroken tasks: all-or-nothing in ONE contiguous gap ---- */
+      if (t.noSplit) {
+        if (need > DAILY_STUDY_CAP - dailyUsed) return need; // no room today
+        for (const b of blocks) {
+          if (b.end - b.start >= need) {
+            sessions.push(makeSession(t, key, b.start, b.start + need, "flexible", false));
+            dailyUsed += need;
+            b.start += need + breakMin;
+            return 0;
+          }
+        }
+        return need; // no single gap big enough — try tomorrow
+      }
+
       let left = need;
       let chunks = 0;
       for (const b of blocks) {
-        if (left <= 0) break;
-        while (b.end - b.start >= MIN_CHUNK && left > 0) {
-          const chunk = Math.min(left, MAX_CHUNK, b.end - b.start);
-          sessions.push(
-            makeSession(t, key, b.start, b.start + chunk, "flexible", contStart || chunks > 0)
-          );
+        if (left <= 0 || dailyUsed >= DAILY_STUDY_CAP) break;
+        while (b.end - b.start >= MIN_CHUNK && left > 0 && dailyUsed < DAILY_STUDY_CAP) {
+          const room = Math.min(left, maxChunk, b.end - b.start, DAILY_STUDY_CAP - dailyUsed);
+          if (room < MIN_CHUNK && left > room) break;
+          const chunk = Math.max(MIN_CHUNK, Math.min(room, left));
+          if (chunk > b.end - b.start) break;
+          sessions.push(makeSession(t, key, b.start, b.start + chunk, "flexible", contStart || chunks > 0));
           chunks++;
           left -= chunk;
-          // leave a small break after the chunk when more work follows
-          b.start += chunk + (left > 0 ? BREAK : 0);
+          dailyUsed += chunk;
+          b.start += chunk + (left > 0 ? breakMin : 0);
         }
       }
       return left;
     };
 
-    /* Flexible placement only happens from `flexStart` onward —
-       past days render fixed commitments for context/history only. */
+    /* Flexible placement only from `flexStart` onward — past days
+       render meals + fixed classes for context only. */
     if (day >= flexStart) {
-      /* ---- 3 · daily habits first (they keep the streak alive) ----- */
+      /* daily habits keep the streak alive */
       for (const t of tasks) {
         if (t.kind !== "flexible" || t.frequency !== "daily" || t.completed) continue;
         pour(t, t.estimatedMinutes);
       }
 
-      /* ---- 4 · weekly routines on their chosen days ---------------- */
+      /* weekly routines on their chosen days */
       for (const t of tasks) {
         if (t.kind !== "flexible" || t.frequency !== "weekly" || t.completed) continue;
         if (t.weeklyDays.includes(dow)) pour(t, t.estimatedMinutes);
       }
 
-      /* ---- 5 · one-offs, nearest deadline gets earliest blocks ----- */
-      const oneOffs = tasks
-        .filter((t) => t.kind === "flexible" && t.frequency === "once" && !t.completed)
-        .sort((a, z) => a.deadline.localeCompare(z.deadline));
+      /* ---- one-offs: urgency first, then spread the load ----------- */
+      const live = oneOffPool
+        .filter((t) => (remaining.get(t.id) ?? 0) > 0 && t.deadline >= key)
+        .map((t) => {
+          const daysLeft = Math.max(1, dayDiff(key, t.deadline) + 1);
+          const left = remaining.get(t.id) ?? 0;
+          return { t, left, daysLeft, pace: left / daysLeft };
+        })
+        /* most urgent (least slack per day) first */
+        .sort((a, b) => b.pace - a.pace || a.t.deadline.localeCompare(b.t.deadline));
 
-      for (const t of oneOffs) {
-        const left0 = remaining.get(t.id) ?? 0;
-        if (left0 <= 0) continue;
-        if (t.deadline < key) continue; // deadline already passed — flagged below
-        const left = pour(t, left0, (placed.get(t.id) ?? 0) > 0);
-        placed.set(t.id, (placed.get(t.id) ?? 0) + (left0 - left));
-        remaining.set(t.id, left);
+      for (const item of live) {
+        if (dailyUsed >= DAILY_STUDY_CAP) break;
+        /* Spread: aim for today's fair share, but always allow a full
+           push when the deadline is imminent (≤2 days). */
+        const fairShare =
+          item.t.noSplit || item.daysLeft <= 2
+            ? item.left // unbroken work can never be paced in pieces
+            : Math.min(item.left, Math.ceil(item.pace / 15) * 15);
+        const target = Math.max(MIN_CHUNK, Math.min(item.left, fairShare));
+        const leftover = pour(item.t, target, (placed.get(item.t.id) ?? 0) > 0);
+        const done = target - leftover;
+        placed.set(item.t.id, (placed.get(item.t.id) ?? 0) + done);
+        remaining.set(item.t.id, (remaining.get(item.t.id) ?? 0) - done);
       }
     }
   }
 
-  /* ---- 6 · report anything that never fit -------------------------- */
+  /* ---- report anything that never fit ----------------------------- */
   const unplaced: Task[] = [];
   for (const [id, left] of remaining) {
     if (left > 0) {
@@ -220,4 +265,13 @@ export function generateSchedule(
     a.date === b.date ? a.start - b.start : a.date.localeCompare(b.date)
   );
   return { sessions, unplaced };
+}
+
+/** whole days between two yyyy-mm-dd keys */
+function dayDiff(a: string, b: string): number {
+  const [ay, am, ad] = a.split("-").map(Number);
+  const [by, bm, bd] = b.split("-").map(Number);
+  return Math.round(
+    (new Date(by, bm - 1, bd).getTime() - new Date(ay, am - 1, ad).getTime()) / 86400000
+  );
 }

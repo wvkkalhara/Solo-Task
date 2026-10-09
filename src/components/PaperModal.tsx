@@ -22,8 +22,9 @@ export default function PaperModal({
   initial: PastPaper | null; // null = create mode
   onClose: () => void;
 }) {
-  const { addPaper, updatePaper, studySubjects } = useApp();
-  const [subject, setSubject] = useState("maths");
+  const { addPaper, updatePaper, studySubjects, setSubjectsOpen } = useApp();
+  const firstSubject = studySubjects[0]?.id ?? "";
+  const [subject, setSubject] = useState("");
   const [year, setYear] = useState(new Date().getFullYear() - 1);
   const [paperType, setPaperType] = useState<PaperType>("MCQ");
   const [part, setPart] = useState<PaperPart | "full">("I");
@@ -35,7 +36,9 @@ export default function PaperModal({
   useEffect(() => {
     if (!open) return;
     if (initial) {
-      setSubject(initial.subject);
+      setSubject(
+        studySubjects.some((s) => s.id === initial.subject) ? initial.subject : firstSubject
+      );
       setYear(initial.year);
       setPaperType(initial.paperType);
       setPart(initial.part ?? "full");
@@ -43,7 +46,7 @@ export default function PaperModal({
       setScore(initial.score ?? 70);
       setDate(initial.date);
     } else {
-      setSubject(studySubjects[0]?.id ?? "maths");
+      setSubject(firstSubject);
       setYear(new Date().getFullYear() - 1);
       setPaperType("MCQ");
       setPart("I");
@@ -51,7 +54,7 @@ export default function PaperModal({
       setScore(70);
       setDate(todayKey());
     }
-  }, [open, initial, studySubjects]);
+  }, [open, initial, studySubjects, firstSubject]);
 
   /* picking a type suggests the realistic A/L part */
   const onTypeChange = (t: PaperType) => {
@@ -60,6 +63,10 @@ export default function PaperModal({
   };
 
   const save = () => {
+    if (!subject) {
+      setSubjectsOpen(true);
+      return;
+    }
     const data = {
       subject,
       year,

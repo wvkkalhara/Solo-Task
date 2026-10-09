@@ -15,20 +15,23 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { FALLBACK_SUBJECT, seedState } from "../lib/data";
-import { generateSchedule } from "../lib/scheduler";
+import { emptyState, FALLBACK_SUBJECT } from "../lib/data";
+import { generateSchedule, PLAN_DAYS } from "../lib/scheduler";
 import {
   cloudSave,
+  flushIfDirty,
   initCloud,
   loadLocal,
   LS_STORAGE_KEY,
   saveLocal,
   type CloudSnapshot,
+  type SyncState,
 } from "../lib/storage";
 import type {
   PastPaper,
   PersistedState,
   Prefs,
+  Routine,
   Session,
   Subject,
   Task,
@@ -36,9 +39,9 @@ import type {
   Toast,
   View,
 } from "../lib/types";
-import { addDays, startOfWeek, todayKey, uid } from "../lib/utils";
+import { addDays, fmtDuration, pad, startOfWeek, todayKey, uid } from "../lib/utils";
 
-type CloudStatus = "local" | "syncing" | "cloud";
+type CloudStatus = SyncState;
 
 interface Ctx {
   state: PersistedState;
@@ -56,6 +59,7 @@ interface Ctx {
   setMobileNav: (b: boolean) => void;
   /* tasks */
   addTask: (input: TaskInput) => void;
+  addInterruption: (name: string, minutes: number, startMin?: number) => void;
   updateTask: (id: string, input: TaskInput) => void;
   deleteTask: (id: string) => void;
   toggleTask: (id: string) => void;
@@ -74,6 +78,11 @@ interface Ctx {
   deleteSubject: (id: string, cascade?: boolean) => void;
   subjectsOpen: boolean;
   setSubjectsOpen: (b: boolean) => void;
+  /* routine / settings */
+  routine: Routine;
+  updateRoutine: (patch: Partial<Routine>) => void;
+  settingsOpen: boolean;
+  setSettingsOpen: (b: boolean) => void;
   /** a just-completed paper awaiting its score */
   pendingScorePaperId: string | null;
   setPendingScorePaperId: (id: string | null) => void;
@@ -105,14 +114,13 @@ const WELLNESS: Omit<Toast, "id">[] = [
 
 export function AppProvider({ children }: { children: ReactNode }) {
   /* ---------- core persisted state (lazy init: local → seed) ------- */
-  const [state, setState] = useState<PersistedState>(
-    () => loadLocal() ?? seedState()
-  );
+  const [state, setState] = useState<PersistedState>(() => loadLocal() ?? emptyState());
   const [view, setView] = useState<View>("dashboard");
   const [weekOffset, setWeekOffset] = useState(0);
-  const [cloud, setCloud] = useState<CloudStatus>("local");
+  const [cloud, setCloud] = useState<CloudStatus>("offline");
   const [mobileNav, setMobileNav] = useState(false);
   const [subjectsOpen, setSubjectsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   /** set when a paper-task is completed → opens the "add marks" modal */
   const [pendingScorePaperId, setPendingScorePaperId] = useState<string | null>(null);
@@ -159,15 +167,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       saveLocal(snap.data); // keep the offline copy fresh too
     };
     void initCloud({
+      getLocal: () => JSON.parse(stateJsonRef.current) as PersistedState,
       onData: handleRemote,
-      onConnection: (online) => {
-        if (!cancelled) setCloud(online ? "cloud" : "local");
+      onStatus: (s) => {
+        if (!cancelled) setCloud(s);
       },
-    }).then((ok) => {
-      if (!cancelled && !ok) setCloud("local");
     });
+
+    /* flush any offline backlog when the tab regains focus */
+    const onFocus = () => !document.hidden && flushIfDirty();
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("online", flushIfDirty);
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("online", flushIfDirty);
     };
   }, []);
 
@@ -243,7 +257,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   /* Render from this week's Monday (so past fixed classes stay visible),
      but only PLACE flexible work from today onward. */
   const { sessions, unplaced } = useMemo(() => {
-    const r = generateSchedule(state.tasks, startOfWeek(new Date()), 14, new Date());
+    const r = generateSchedule(
+      state.tasks,
+      startOfWeek(new Date()),
+      state.prefs.routine,
+      PLAN_DAYS,
+      new Date()
+    );
     for (const s of r.sessions) s.done = !!state.doneSessions[s.id];
     return r;
   }, [state.tasks, state.doneSessions]);
@@ -293,6 +313,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
     },
     [pushToast]
+  );
+
+  /**
+   * Quick-capture an unplanned commitment that is happening NOW
+   * (visitor, errand, extra class). It claims real time today, and
+   * every flexible block is instantly re-planned around it.
+   */
+  const addInterruption = useCallback(
+    (name: string, minutes: number, startMin?: number) => {
+      const now = new Date();
+      const begin = startMin ?? now.getHours() * 60 + now.getMinutes();
+      const end = Math.min(24 * 60 - 1, begin + minutes);
+      const date = todayKey();
+
+      const task: Task = {
+        id: uid(),
+        name: name.trim() || "Something came up",
+        subject: state.subjects[0]?.id ?? "",
+        estimatedMinutes: minutes,
+        deadline: date,
+        frequency: "once",
+        weeklyDays: [],
+        kind: "fixed",
+        urgent: true,
+        startTime: `${pad(Math.floor(begin / 60))}:${pad(begin % 60)}`,
+        endTime: `${pad(Math.floor(end / 60))}:${pad(end % 60)}`,
+        completed: false,
+        createdAt: Date.now(),
+      };
+
+      /* measure how much study today gets pushed out, so the toast
+         can tell the truth instead of a vague "rescheduled" */
+      const before = generateSchedule(state.tasks, now, state.prefs.routine, 1, now)
+        .sessions.filter((s) => s.date === date && s.kind === "flexible")
+        .reduce((a, s) => a + (s.end - s.start), 0);
+      const after = generateSchedule([...state.tasks, task], now, state.prefs.routine, 1, now)
+        .sessions.filter((s) => s.date === date && s.kind === "flexible")
+        .reduce((a, s) => a + (s.end - s.start), 0);
+      const moved = Math.max(0, before - after);
+
+      setState((s) => ({ ...s, tasks: [...s.tasks, task] }));
+      pushToast({
+        icon: "sparkle",
+        title: `Blocked ${fmtDuration(minutes)} — plan updated`,
+        body:
+          moved > 0
+            ? `${fmtDuration(moved)} of study moved to your next free time.`
+            : "Nothing was displaced — you had room for this.",
+      });
+    },
+    [state.tasks, state.subjects, state.prefs.routine, pushToast]
   );
 
   const updateTask = useCallback((id: string, input: TaskInput) => {
@@ -501,8 +572,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const resetAll = useCallback(() => {
     localStorage.clear();
-    setState(seedState());
+    setState(emptyState());
     setWeekOffset(0);
+  }, []);
+
+  /* ------------------------ daily routine --------------------------- */
+  const updateRoutine = useCallback((patch: Partial<Routine>) => {
+    setState((s) => ({
+      ...s,
+      prefs: { ...s.prefs, routine: { ...s.prefs.routine, ...patch } },
+    }));
   }, []);
 
   const value: Ctx = {
@@ -520,6 +599,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     mobileNav,
     setMobileNav,
     addTask,
+    addInterruption,
     updateTask,
     deleteTask,
     toggleTask,
@@ -536,6 +616,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     deleteSubject,
     subjectsOpen,
     setSubjectsOpen,
+    routine: state.prefs.routine,
+    updateRoutine,
+    settingsOpen,
+    setSettingsOpen,
     pendingScorePaperId,
     setPendingScorePaperId,
     setWellness,

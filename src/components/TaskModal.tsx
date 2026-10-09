@@ -5,12 +5,12 @@
 /* ------------------------------------------------------------------ */
 
 import { AnimatePresence, motion } from "framer-motion";
-import { CalendarClock, FileStack, Sparkles, X } from "lucide-react";
+import { CalendarClock, FileStack, Sparkles, Timer, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { detectPaper, paperLabel } from "../lib/insights";
 import type { Frequency, Task, TaskInput, TaskKind } from "../lib/types";
-import { addDays, dateKey, DAY_PICKER } from "../lib/utils";
+import { addDays, dateKey, DAY_PICKER, fmtDuration } from "../lib/utils";
 import { MicButton } from "./ui";
 
 const TIME_PRESETS = [15, 30, 45, 60, 90, 120, 180];
@@ -24,12 +24,13 @@ export default function TaskModal({
   initial: Task | null; // null = create mode
   onClose: () => void;
 }) {
-  const { addTask, updateTask, pushToast, subjects } = useApp();
+  const { addTask, updateTask, pushToast, subjects, setSubjectsOpen } = useApp();
+  const firstSubject = subjects[0]?.id ?? "";
 
   /* form state */
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
-  const [subject, setSubject] = useState("maths");
+  const [subject, setSubject] = useState("");
   const [minutes, setMinutes] = useState(60);
   const [deadline, setDeadline] = useState(dateKey(addDays(new Date(), 3)));
   const [frequency, setFrequency] = useState<Frequency>("once");
@@ -41,6 +42,8 @@ export default function TaskModal({
   /** user's choice to mirror this task into the Past Paper vault */
   const [asPaper, setAsPaper] = useState(false);
   const [paperTouched, setPaperTouched] = useState(false);
+  /** must be done in one unbroken sitting */
+  const [noSplit, setNoSplit] = useState(false);
 
   /* live detection: "Physics 2022 Paper I MCQ" → paper metadata */
   const detected = useMemo(() => detectPaper(`${name} ${notes}`), [name, notes]);
@@ -56,10 +59,12 @@ export default function TaskModal({
     setError("");
     setPaperTouched(!!initial); // keep the saved choice when editing
     setAsPaper(!!initial?.paperMeta);
+    setNoSplit(!!initial?.noSplit);
     if (initial) {
       setName(initial.name);
       setNotes(initial.notes ?? "");
-      setSubject(initial.subject);
+      /* if the task's subject was deleted, fall back to a live one */
+      setSubject(subjects.some((s) => s.id === initial.subject) ? initial.subject : firstSubject);
       setMinutes(initial.estimatedMinutes);
       setDeadline(initial.deadline);
       setFrequency(initial.frequency);
@@ -70,7 +75,7 @@ export default function TaskModal({
     } else {
       setName("");
       setNotes("");
-      setSubject("maths");
+      setSubject(firstSubject);
       setMinutes(60);
       setDeadline(dateKey(addDays(new Date(), 3)));
       setFrequency("once");
@@ -79,13 +84,14 @@ export default function TaskModal({
       setStartTime("17:00");
       setEndTime("18:00");
     }
-  }, [open, initial]);
+  }, [open, initial, firstSubject, subjects]);
 
   const unsupportedVoice = () =>
     pushToast({ icon: "info", title: "Voice typing unavailable", body: "Your browser doesn’t support the Web Speech API." });
 
   const save = () => {
     if (!name.trim()) return setError("Give the task a name first.");
+    if (!subject) return setError("Pick a subject — add one if the list is empty.");
     if (frequency === "weekly" && weeklyDays.length === 0)
       return setError("Pick at least one day for a weekly task.");
     if (kind === "fixed" && endTime <= startTime)
@@ -103,6 +109,7 @@ export default function TaskModal({
       startTime: kind === "fixed" ? startTime : undefined,
       endTime: kind === "fixed" ? endTime : undefined,
       paperMeta: asPaper && detected ? detected : undefined,
+      noSplit: kind === "flexible" ? noSplit : undefined,
     };
     if (initial) updateTask(initial.id, input);
     else addTask(input);
@@ -220,6 +227,15 @@ export default function TaskModal({
               <div>
                 <label className="field-label">Subject</label>
                 <div className="flex flex-wrap gap-2">
+                  {subjects.length === 0 && (
+                    <button
+                      type="button"
+                      className="chip cursor-pointer !border-dashed !py-1.5"
+                      onClick={() => setSubjectsOpen(true)}
+                    >
+                      + Add your first subject
+                    </button>
+                  )}
                   {subjects.map((s) => (
                     <button
                       key={s.id}
@@ -268,6 +284,33 @@ export default function TaskModal({
                   />
                 </div>
               </div>
+
+              {/* unbroken sitting */}
+              {kind === "flexible" && (
+                <button
+                  type="button"
+                  onClick={() => setNoSplit((v) => !v)}
+                  className={`flex w-full items-start gap-3 rounded-xl border p-3.5 text-left transition-all ${
+                    noSplit
+                      ? "border-amber-400/50 bg-amber-400/10"
+                      : "border-[var(--border)] hover:border-[var(--border-strong)]"
+                  }`}
+                >
+                  <Timer
+                    size={17}
+                    className={`mt-0.5 flex-none ${noSplit ? "text-amber-400" : "text-[var(--muted)]"}`}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[13px] font-bold">Do in one sitting — no breaks</span>
+                    <span className="block text-[11.5px] leading-snug text-[var(--muted)]">
+                      {noSplit
+                        ? `Reserved as one unbroken ${fmtDuration(minutes)} block — never chopped up.`
+                        : "For timed papers & exams. Finds a single gap big enough instead of splitting."}
+                    </span>
+                  </span>
+                  <span className={`switch mt-0.5 ${noSplit ? "on" : ""}`} />
+                </button>
+              )}
 
               {/* frequency */}
               <div>

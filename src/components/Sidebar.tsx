@@ -9,6 +9,7 @@ import {
   BookMarked,
   CalendarDays,
   ChartNoAxesColumn,
+  Clock,
   Cloud,
   CloudOff,
   Download,
@@ -16,6 +17,7 @@ import {
   GraduationCap,
   LayoutDashboard,
   ListChecks,
+  RefreshCw,
   RotateCcw,
   X,
 } from "lucide-react";
@@ -48,6 +50,8 @@ export default function Sidebar() {
     pushToast,
     subjects,
     setSubjectsOpen,
+    setSettingsOpen,
+    routine,
   } = useApp();
 
   const openTasks = state.tasks.filter((t) => !t.completed).length;
@@ -121,6 +125,15 @@ export default function Sidebar() {
         </span>
       </button>
 
+      {/* Daily routine / settings */}
+      <button className="nav-item" onClick={() => { setSettingsOpen(true); setMobileNav(false); }}>
+        <Clock size={17} className="nav-ico" />
+        <span>My day</span>
+        <span className="ml-auto font-mono text-[10px] text-[var(--muted)]">
+          {routine.wake}–{routine.sleep}
+        </span>
+      </button>
+
       {/* Scheduler health warning */}
       {unplaced.length > 0 && (
         <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-amber-400/30 bg-amber-400/10 p-3 text-[12px] leading-snug text-amber-500 dark:text-amber-300">
@@ -162,17 +175,32 @@ export default function Sidebar() {
 
         {/* Sync status */}
         <div className="glass flex items-center gap-3 rounded-xl p-3 text-[12px] text-[var(--muted)]">
-          {cloud === "cloud" ? (
+          {cloud === "synced" ? (
             <>
               <Cloud size={15} className="text-emerald-400" />
               <span className="min-w-0 flex-1">
-                <span className="font-semibold text-emerald-400">Live sync</span> · Firebase RTDB
+                <span className="font-semibold text-emerald-400">All changes saved</span> · synced
+              </span>
+            </>
+          ) : cloud === "syncing" ? (
+            <>
+              <RefreshCw size={15} className="animate-spin text-[var(--acc2)]" />
+              <span className="min-w-0 flex-1">
+                <span className="font-semibold text-[var(--acc2)]">Saving…</span> · saved on device
+              </span>
+            </>
+          ) : cloud === "pending" ? (
+            <>
+              <CloudOff size={15} className="text-amber-400" />
+              <span className="min-w-0 flex-1">
+                <span className="font-semibold text-amber-400">Saved offline</span> · syncs when back
+                online
               </span>
             </>
           ) : (
             <>
               <CloudOff size={15} />
-              <span className="min-w-0 flex-1">Offline — saved on this device, syncs when back online</span>
+              <span className="min-w-0 flex-1">Offline — everything saved on this device</span>
             </>
           )}
           <button

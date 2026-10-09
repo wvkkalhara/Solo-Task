@@ -45,7 +45,7 @@ const TONE_COLOR: Record<Insight["tone"], string> = {
 };
 
 export default function AnalyticsView() {
-  const { state, sessions, studySubjects, subject } = useApp();
+  const { state, sessions, studySubjects, subject, routine } = useApp();
   /* analytics reflect the real current week, not the browsed week */
   const weekStart = startOfWeek(new Date());
 
@@ -76,7 +76,9 @@ export default function AnalyticsView() {
 
   /* ---------- sessions this week (fair completion) ---------- */
   const tKey = dateKey(new Date());
-  const weekSessions = sessions.filter((s) => weekKeys.includes(s.date) && s.subject !== "school");
+  const weekSessions = sessions.filter(
+    (s) => weekKeys.includes(s.date) && s.subject !== "school" && s.kind !== "meal"
+  );
   const pastDone = weekSessions.filter((s) => s.date < tKey && s.done).length;
   const pending = weekSessions.filter((s) => s.date >= tKey);
   const doneSessions = pastDone + pending.filter((s) => s.done).length;
@@ -144,7 +146,7 @@ export default function AnalyticsView() {
   });
 
   /* capacity insight — how much room is actually left this week */
-  const freeWeek = getFreeTime(sessions, new Date(), 7);
+  const freeWeek = getFreeTime(sessions, new Date(), routine, 7);
   const freeMins = freeWeek.reduce((a, d) => a + d.freeMinutes, 0);
   const avgLoad = freeWeek.reduce((a, d) => a + d.load, 0) / Math.max(1, freeWeek.length);
   insights.push({

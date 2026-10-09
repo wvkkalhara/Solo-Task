@@ -2,7 +2,7 @@
 /*  TopBar — page context + global actions (print, theme, add task)    */
 /* ------------------------------------------------------------------ */
 
-import { Menu, Moon, Plus, Printer, Sun } from "lucide-react";
+import { Menu, Moon, Plus, Printer, Sun, Zap } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { DAYS_SHORT } from "../lib/utils";
 
@@ -14,7 +14,15 @@ const TITLES: Record<string, string> = {
   analytics: "Workload analytics",
 };
 
-export default function TopBar({ onAddTask }: { onAddTask: () => void }) {
+export default function TopBar({
+  onAddTask,
+  onPrint,
+  onInterrupt,
+}: {
+  onAddTask: () => void;
+  onPrint: () => void;
+  onInterrupt: () => void;
+}) {
   const { view, theme, toggleTheme, setMobileNav } = useApp();
   const now = new Date();
 
@@ -41,12 +49,20 @@ export default function TopBar({ onAddTask }: { onAddTask: () => void }) {
 
         <div className="ml-auto flex items-center gap-2">
           <button
+            className="btn btn-ghost !px-3 !border-amber-400/40 !text-amber-400"
+            onClick={onInterrupt}
+            title="Something came up — block time now and reflow the plan"
+          >
+            <Zap size={15} />
+            <span className="hidden md:inline">Came up</span>
+          </button>
+          <button
             className="btn btn-ghost !px-3"
-            onClick={() => window.print()}
-            title="Generate printable week report"
+            onClick={onPrint}
+            title="Open Print Center"
           >
             <Printer size={15} />
-            <span className="hidden sm:inline">Print week</span>
+            <span className="hidden sm:inline">Print</span>
           </button>
           <button
             className="icon-btn"
